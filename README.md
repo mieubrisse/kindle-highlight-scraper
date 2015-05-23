@@ -1,5 +1,5 @@
 ### Motivation
-Many free tools exist to download your Kindle highlights, but they all require some form of manual input and would be difficult to automate. The provided tool provides a scriptable method for downloading _all_ your Kindle notes as JSON for automated backup, statistics, etc. Note that no official API exists, so the information returned is limited to what's available on the "Your Highlights" link reachable from the [Kindle homepage](kindle.amazon.com).
+Many free tools exist to download your Kindle highlights, but they all require some form of manual input and would be difficult to automate. The provided tool provides a scriptable method for downloading _all_ your Kindle notes as JSON for automated backup, statistics, export to other services, etc. Note that no official API exists, so the information returned is limited to what's available on the "Your Highlights" link reachable from the [Kindle homepage](kindle.amazon.com).
 
 ### Installation & Use
 1. Install [Easy Install](http://peak.telecommunity.com/DevCenter/EasyInstall#installing-easy-install)
