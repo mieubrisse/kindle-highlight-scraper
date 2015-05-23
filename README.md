@@ -1,13 +1,14 @@
-## Motivation
+### Motivation
 Many free tools exist to download your Kindle notes, but they all require some form of manual input or are difficult to automate. The provided script is an entirely programmatic way of downloading your Kindle highlights and notes as JSON.
 
-## Installation & Use
+### Installation & Use
 1. Install [Easy Install](http://peak.telecommunity.com/DevCenter/EasyInstall#installing-easy-install)
 2. Run ``easy_install mechanize``
-3. Create a credentials file of the form: ``` json { "email": "me@gmail.com", "password": "pass123" } ```
-4. Run ``extract_kindle_notes.py -c creds.json -o outputfile.json``
+3. Create a JSON credentials file of the form: `` { "email": "me@gmail.com", "password": "pass123" } ``
+4. Restrict permissions of the creds file if you like
+5. Run ``extract_kindle_notes.py -c creds.json -o outputfile.json``
 
-Full Usage:
+**Full Usage:**
 ```
 Usage: scrape_kindle_highlights.py [options]
 
@@ -31,4 +32,5 @@ Options:
                         disables sorting of keys in JSON output
 ```
 
-
+### Todo
+* Refactor into something that's not one enormous file
