@@ -40,7 +40,7 @@ def parse_options():
     """ Parse command line options and return the options dict """
     sort_notes_opt_help_str="sort notes within book by: " + ", ".join(SORT_NOTES_CHOICES) + " [default: %default]"
     creds_opt_help_str="path to JSON file containing Amazon login credentials in the form { " + EMAIL_CRED_KEY + " : <email>, " + PASSWORD_CRED_KEY + " : <password> }"
-
+    
     parser = OptionParser()
     parser.add_option("-o", "--output", dest=OUTPUT_FILEPATH_VAR, help="", metavar="FILE")
     parser.add_option("-s", "--note-sort", type="choice", metavar="SORT TYPE", dest=NOTE_SORT_TYPE_VAR, choices=SORT_NOTES_CHOICES, default=SORT_NOTES_RECENCY, help=sort_notes_opt_help_str)
@@ -109,7 +109,16 @@ def initialize_browser():
     browser.addheaders = [("User-agent", "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.2.13) Gecko/20101206 Ubuntu/10.10 (maverick) Firefox/3.6.13")]
     return browser
 
+def strip_invalid_html(html):
+    """ The responses Amazon gives back don't pass the Python HTML parser, so we need to do some processing on them """
+    # The initial HTML we get has malformed headers
+    doctype_stripped = re.sub('<!DOCTYPE[^>]*>', '', html)
+    return re.sub('\\\\', '', doctype_stripped)
+
 def perform_kindle_login(browser, email, password):
+    """ 
+    Log in to Amazon Kindle using the provided email and passwords and exit if login fails
+    """
     # Login to Amazon
     browser.open(AMAZON_LOGIN_URL)
     bugged_response = browser.response().get_data()
@@ -120,7 +129,17 @@ def perform_kindle_login(browser, email, password):
     browser.select_form(name="signIn")
     browser["email"] = email
     browser["password"] = password
-    return browser.submit()
+
+    login_response =  browser.submit()
+    if login_response.code >= 400:
+        print "Error: Failed to log in to " + AMAZON_LOGIN_URL
+        exit()
+    login_html = strip_invalid_html(login_response.get_data())
+    soup = BeautifulSoup(login_html)
+    # Amazon doesn't use response codes or data to indicate errors... it uses HTML, built on the backend :|
+    if len(soup.select("div.message.error")) != 0:
+        print "Error: Failed to log in to " + AMAZON_LOGIN_URL
+        exit()
 
 def load_highlights_page(browser):
     """ 
@@ -138,11 +157,10 @@ def initialize_elements_to_process(html):
     Initializes the emulated state of the Javascript frontend: elements to process, asins that have already been seen, and the mysterious offset tag that the backend somehow uses
     Return - triple of (BeautifulSoup tags to process, list of the one ASIN that's loaded now, and the offset that came with the ASIN)
     """
-    # The initial HTML we get has malformed headers
-    html = re.sub('<!DOCTYPE[^>]*>', '', html)
-    html = re.sub('\\\\', '', html)
 
-    soup = BeautifulSoup(html)
+    corrected_html = strip_invalid_html(html)
+
+    soup = BeautifulSoup(corrected_html)
     tags_to_process = soup.select("#{0} > div".format(PARENT_DIV_CLASS))
     
     # One book will be loaded to start, so - like Amazon does - we need to initialize the offset and used_asins from there
@@ -325,10 +343,7 @@ if __name__ == "__main__":
         has_output_filepath = False
     email, password = extract_credentials(options)
     browser  = initialize_browser()
-    login_response = perform_kindle_login(browser, email, password)
-    if login_response.code >= 400:
-        print "Error: Login failure"
-        exit()
+    perform_kindle_login(browser, email, password)
     loading_response = load_highlights_page(browser)
     tags_to_process =  scrape_highlight_elements_from_page(loading_response, browser)
     highlighted_books = build_books_list(tags_to_process, loading_response.geturl())
