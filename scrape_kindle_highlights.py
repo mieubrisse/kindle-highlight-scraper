@@ -52,11 +52,11 @@ def parse_options():
     creds_opt_help_str="path to JSON file containing Amazon login credentials in the form { " + EMAIL_CRED_KEY + " : <email>, " + PASSWORD_CRED_KEY + " : <password> }"
     
     parser = OptionParser()
-    parser.add_option("-o", "--output", dest=OUTPUT_FILEPATH_VAR, help="output file to write JSON to", metavar="FILE")
+    parser.add_option("-o", "--output", dest=OUTPUT_FILEPATH_VAR, help="filepath to write JSON output to", metavar="FILE")
     parser.add_option("-s", "--note-sort", type="choice", metavar="TYPE", dest=NOTE_SORT_TYPE_VAR, choices=SORT_NOTES_CHOICES, default=SORT_NOTES_RECENCY, help=sort_notes_opt_help_str)
     parser.add_option("-c", "--cred-file", dest=CREDS_FILEPATH_VAR, help=creds_opt_help_str, metavar="FILE")
-    parser.add_option("-e", "--encoding", default="utf-8", dest=ENCODING_VAR, help="sets Unicode encoding when dumping JSON (see Python codecs for more info) [default: %default]")
-    parser.add_option("-i", "--indent-level", type="int", default=4, dest=JSON_INDENT_VAR, help="sets number of spaces to use when formatting JSON output [default: %default]")
+    parser.add_option("-e", "--encoding", default="utf-8", dest=ENCODING_VAR, help="sets encoding to use when dumping JSON (commonly 'utf-8' or 'unicode-escape') [default: %default]")
+    parser.add_option("-i", "--indent-level", type="int", default=4, dest=JSON_INDENT_VAR, help="number of indentation spaces to use when formatting JSON output [default: %default]")
     parser.add_option("-d", "--disable-key-sorting", action="store_false", default=True, dest=JSON_SORT_KEYS_VAR, help="disables sorting of keys in JSON output")
     options, _ =  parser.parse_args()
     return vars(options)
