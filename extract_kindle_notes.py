@@ -6,10 +6,19 @@ from bs4 import BeautifulSoup
 import json
 import urllib
 from sys import exit
+from optparse import OptionParser
+import os
+from getpass import getpass
 
+OUTPUT_FILEPATH_VAR="output_filepath"
+NOTE_SORT_TYPE_VAR="note_sort_type"
+CREDS_FILEPATH_VAR="creds_filepath"
+EMAIL_CRED_KEY="email"
+PASSWORD_CRED_KEY="password"
 
-email = raw_input("Email: ")
-password = raw_input("Password: ")
+SORT_NOTES_RECENCY="recency"
+SORT_NOTES_LOCATION="location"
+SORT_NOTES_CHOICES=[SORT_NOTES_RECENCY, SORT_NOTES_LOCATION]
 
 # Move this to a better spot
 BOOK_HIGHLIGHTS_KEY = "notes"
@@ -26,6 +35,72 @@ KINDLE_HOME_URL = "https://kindle.amazon.com"
 KINDLE_HIGHLIGHTS_HREF = "/your_highlights"
 KINDLE_HIGHLIGHTS_URL = KINDLE_HOME_URL + KINDLE_HIGHLIGHTS_HREF
 
+
+def parse_options():
+    """ Parse command line options and return the options dict """
+    sort_notes_opt_help_str="sort notes within book by: " + ", ".join(SORT_NOTES_CHOICES) + " [default: %default]"
+    creds_opt_help_str="path to JSON file containing Amazon login credentials in the form { " + EMAIL_CRED_KEY + " : <email>, " + PASSWORD_CRED_KEY + " : <password> }"
+
+    parser = OptionParser()
+    parser.add_option("-o", "--output", dest=OUTPUT_FILEPATH_VAR, help="", metavar="FILE")
+    parser.add_option("-s", "--note-sort", type="choice", metavar="SORT TYPE", dest=NOTE_SORT_TYPE_VAR, choices=SORT_NOTES_CHOICES, default=SORT_NOTES_RECENCY, help=sort_notes_opt_help_str)
+    parser.add_option("-c", "--cred-file", dest=CREDS_FILEPATH_VAR, help=creds_opt_help_str, metavar="FILE")
+    options, _ =  parser.parse_args()
+    return vars(options)
+
+def validate_output_filepath(output_filepath):
+    """ 
+    Tries to write a testfile to the user's desired output location and exits the script if it cannot
+    NOTE: This will squash anything that exists at the given location currently
+    """
+    try:
+        output_fp = open(output_filepath, 'w')
+        output_fp.close()
+    except IOError:
+        print "Error: Cannot open output filepath '{0}' for writing".format(output_filepath)
+        exit()
+    if not os.path.isfile(output_filepath):
+        print "Error: Could not write test file to output location '{0}'".format(output_filepath)
+        exit()
+    try:
+        os.remove(output_filepath)
+    except IOError:
+        print "Error: Removing test file at output filepath '{0}' failed".format(output_filepath)
+        exit()
+
+def extract_credentials(options):
+    """ 
+    Gets the user's Amazon email/password combination, either from user input or from a creds file 
+    Return - tuple of (email, password)
+    """
+    if options[CREDS_FILEPATH_VAR] is None:
+        need_creds = True
+        while need_creds:
+            email = raw_input("Email: ")
+            password = getpass("Password: ")
+            if email is None or password is None or len(email.strip()) == 0 or len(password.strip()) == 0: 
+                print "Invalid email/password; try again"
+            else:
+                need_creds = False
+        return (email, password)
+    else:
+        creds_filepath = options[CREDS_FILEPATH_VAR]
+        if not os.path.isfile(creds_filepath):
+            print "Error: No creds file found at " + creds_filepath
+            exit()
+        creds_fp = open(creds_filepath, 'r')
+        try:
+            creds = json.load(creds_fp)
+        except ValueError:
+            print "Error: Creds file is not valid JSON"
+            exit()
+        if EMAIL_CRED_KEY not in creds or PASSWORD_CRED_KEY not in creds:
+            print "Error: Could not find email/password keys in cred JSON"
+            exit()
+        email = creds[EMAIL_CRED_KEY]
+        password = creds[PASSWORD_CRED_KEY]
+        return (email, password)
+
 def initialize_browser():
     """ Returns the browser after initialization """
     browser = mechanize.Browser()
@@ -34,7 +109,7 @@ def initialize_browser():
     browser.addheaders = [("User-agent", "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.2.13) Gecko/20101206 Ubuntu/10.10 (maverick) Firefox/3.6.13")]
     return browser
 
-def perform_kindle_login(browser):
+def perform_kindle_login(browser, email, password):
     # Login to Amazon
     browser.open(AMAZON_LOGIN_URL)
     bugged_response = browser.response().get_data()
@@ -43,7 +118,6 @@ def perform_kindle_login(browser):
     correct_response = mechanize.make_response(incorrect_backslashes_stripped, [("Content-Type", "text/html")], AMAZON_LOGIN_URL, 200, "OK")
     browser.set_response(correct_response)
     browser.select_form(name="signIn")
-    # !!!! SUPER BAD ~~ make this read from something !!!!
     browser["email"] = email
     browser["password"] = password
     return browser.submit()
@@ -64,11 +138,15 @@ def initialize_elements_to_process(html):
     Initializes the emulated state of the Javascript frontend: elements to process, asins that have already been seen, and the mysterious offset tag that the backend somehow uses
     Return - triple of (BeautifulSoup tags to process, list of the one ASIN that's loaded now, and the offset that came with the ASIN)
     """
+    # The initial HTML we get has malformed headers
+    html = re.sub('<!DOCTYPE[^>]*>', '', html)
+    html = re.sub('\\\\', '', html)
+
     soup = BeautifulSoup(html)
-    tags_to_process = soup.select("#" + PARENT_DIV_CLASS + " > div")
+    tags_to_process = soup.select("#{0} > div".format(PARENT_DIV_CLASS))
     
     # One book will be loaded to start, so - like Amazon does - we need to initialize the offset and used_asins from there
-    initial_book_tag = soup.select("#" + PARENT_DIV_CLASS + " > div.yourHighlightsHeader")[0]
+    initial_book_tag = soup.select("#{0} > div.{1}".format(PARENT_DIV_CLASS, BOOK_DIV_CLASS))[0]
     initial_book_asin, initial_offset = initial_book_tag["id"].split("_")
     return (tags_to_process, [initial_book_asin], initial_offset)
 
@@ -232,17 +310,30 @@ def build_books_list(tags_to_process, highlights_url):
     
     return books
 
+def write_books_to_file(books, options):
+    fp = open(output_filepath, 'w')
+    json.dump(highlighted_books, fp, indent=4, sort_keys=True)
+    print json.dumps(highlighted_books, indent=4, sort_keys=True)
+    fp.close()
+
 if __name__ == "__main__":
+    options = parse_options()
+    if options[OUTPUT_FILEPATH_VAR] is not None:
+        has_output_filepath = True
+        validate_output_filepath(options[OUTPUT_FILEPATH_VAR])
+    else:
+        has_output_filepath = False
+    email, password = extract_credentials(options)
     browser  = initialize_browser()
-    login_response = perform_kindle_login(browser)
+    login_response = perform_kindle_login(browser, email, password)
     if login_response.code >= 400:
         print "Error: Login failure"
         exit()
     loading_response = load_highlights_page(browser)
     tags_to_process =  scrape_highlight_elements_from_page(loading_response, browser)
     highlighted_books = build_books_list(tags_to_process, loading_response.geturl())
-    
-    fp = open('testfile.out', 'w')
-    json.dump(highlighted_books, fp, indent=4, sort_keys=True)
-    print json.dumps(highlighted_books, indent=4, sort_keys=True)
-    fp.close()
+
+    if has_output_filepath:
+        write_books_to_file(highlighted_books, options)
+    else:
+        print json.dumps(highlighted_books)
