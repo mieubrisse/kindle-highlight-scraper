@@ -12,6 +12,7 @@ from getpass import getpass
 import codecs
 import io
 
+# Options parsing constants
 OUTPUT_FILEPATH_VAR="output_filepath"
 NOTE_SORT_TYPE_VAR="note_sort_type"
 CREDS_FILEPATH_VAR="creds_filepath"
@@ -20,8 +21,6 @@ JSON_INDENT_VAR="json_indent"
 JSON_SORT_KEYS_VAR="json_sort_keys"
 EMAIL_CRED_KEY="email"
 PASSWORD_CRED_KEY="password"
-
-
 SORT_NOTES_RECENCY="recency"
 SORT_NOTES_LOCATION="location"
 SORT_NOTES_CHOICES=[SORT_NOTES_RECENCY, SORT_NOTES_LOCATION]
@@ -29,13 +28,18 @@ SORT_NOTES_CHOICES=[SORT_NOTES_RECENCY, SORT_NOTES_LOCATION]
 # Put the rest of the keys here as well
 BOOK_HIGHLIGHTS_KEY = "notes"
 BOOK_ASIN_KEY = "asin"
+BOOK_URL_KEY = "url"
+BOOK_AUTHOR_KEY = "author"
+BOOK_TITLE_KEY = "title"
+HIGHLIGHT_LOCATION_KEY = "location"
+HIGHLIGHT_TEXT_KEY = "highlighted_text"
+HIGHLIGHT_NOTE_KEY = "note"
+HIGHLIGHT_CONTEXT_KEY = "context"
 
-# HTML stuff 
+# Web-scraping constants
 PARENT_DIV_CLASS = "allHighlightedBooks"
 BOOK_DIV_CLASS = "bookMain"
 HIGHLIGHT_DIV_CLASS = "highlightRow"
-
-# URLs n' stuff
 AMAZON_LOGIN_URL = "http://kindle.amazon.com/login"
 KINDLE_HOME_URL = "https://kindle.amazon.com"
 KINDLE_HIGHLIGHTS_HREF = "/your_highlights"
@@ -245,10 +249,12 @@ def extract_book_info(book_tag, url):
     title_tags = book_tag.select("span.title > a")
     if len(title_tags) > 0:
         title_tag = title_tags[0]
-        if "href" in title_tag:
-            new_book["url"] = url + title_tag["href"]
+        try:
+            new_book[BOOK_URL_KEY] = url + title_tag["href"]
+        except KeyError:
+            pass
         # Is it possible for a book to lack a title here?
-        new_book["title"] = title_tag.string.strip()
+        new_book[BOOK_TITLE_KEY] = title_tag.string.strip()
     else:
         print "Warning: No title span element found for book with ASIN " + book_asin
     
@@ -259,9 +265,9 @@ def extract_book_info(book_tag, url):
         author_str = author_tag.string.strip()
         attribution_str = "by "
         if author_str.startswith(attribution_str):
-            new_book["author"] = author_str[len(attribution_str):]
+            new_book[BOOK_AUTHOR_KEY] = author_str[len(attribution_str):]
         else:
-            new_book["author"] = author_str
+            new_book[BOOK_AUTHOR_KEY] = author_str
     else:
         print "Warning: No author span element found for book with ASIN " + book_asin
     
@@ -283,20 +289,25 @@ def extract_highlight_info(highlight_tag, book_asin):
             print "Warning: Missing highlight location number for highlight for book ASIN: " + book_asin
         else:
             highlight_location = int(match_text)
-            new_highlight["location"] = highlight_location
+            new_highlight[HIGHLIGHT_LOCATION_KEY] = highlight_location
     else:
         print "Warning: Missing highlight location span for highlight for book ASIN: " + book_asin
     
-    # Extract highlighted text
+    # Extract highlighted text; if missing, the note will have 'context' instead
     highlighted_text_tags = highlight_tag.select("span.highlight")
     if len(highlighted_text_tags) > 0:
         highlighted_text_tag = highlighted_text_tags[0]
-        new_highlight["highlighted_text"] = highlighted_text_tag.string.strip()
+        new_highlight[HIGHLIGHT_TEXT_KEY] = highlighted_text_tag.string.strip()
     else:
-        if highlight_location is None:
-            print "Warning: No highlighted text span element found for highlight for book with ASIN: " + book_asin
+        context_tags = highlight_tag.select("span.context")
+        if len(context_tags) > 0:
+            context_tag = context_tags[0]
+            new_highlight[HIGHLIGHT_CONTEXT_KEY] = context_tag.string.strip()
         else:
-            print "Warning: No highlighted text span element found for highlight at location " + str(highlight_location)
+            if highlight_location is None:
+                print "Warning: No highlighted text or context span elements found for highlight for book with ASIN: " + book_asin
+            else:
+                print "Warning: No highlighted text or context span elements found for highlight at location " + str(highlight_location)
     
     # Extract note text
     note_content_tags = highlight_tag.select("span.noteContent")
@@ -304,7 +315,7 @@ def extract_highlight_info(highlight_tag, book_asin):
         note_content_tag = note_content_tags[0]
         note_content = note_content_tag.string
         if not (note_content is None or len(note_content.strip()) == 0):
-            new_highlight["note"] = note_content_tag.string.strip(' \n"')
+            new_highlight[HIGHLIGHT_NOTE_KEY] = note_content_tag.string.strip(' \n"')
     else:
         print "Warning: Skipping adding note content because len is " + str(len(note_content_tags))
     
@@ -345,6 +356,7 @@ def build_books_list(tags_to_process, highlights_url):
     return books
 
 def dump_json(json_input, options):
+    """ Encapsulate the JSON-formatting logic """
     encoding = options[ENCODING_VAR]
     indent_level = options[JSON_INDENT_VAR]
     sort_keys = options[JSON_SORT_KEYS_VAR]
@@ -354,12 +366,6 @@ def dump_json(json_input, options):
         # We do the following because sometimes the json library in Python 2 will write a mix of Unicode and str objects as per here:
         # http://stackoverflow.com/questions/18337407/saving-utf-8-texts-in-json-dumps-as-utf8-not-as-u-escape-sequence
         return unicode(json.dumps(json_input, indent=indent_level, sort_keys=sort_keys, ensure_ascii=False)).encode(encoding)
-
-def write_books_to_file(books, options):
-    encoding = options[ENCODING_VAR]
-    output_filepath = options[OUTPUT_FILEPATH_VAR]
-    with open(output_filepath, 'w') as fp:
-        fp.write(dump_json(books, options))
 
 if __name__ == "__main__":
     # Deal with options
@@ -377,11 +383,12 @@ if __name__ == "__main__":
     perform_kindle_login(browser, email, password)
     loading_response = load_highlights_page(browser)
     tags_to_process =  scrape_highlight_elements_from_page(loading_response, browser)
-    highlighted_books = build_books_list(tags_to_process, loading_response.geturl())
+    highlighted_books = build_books_list(tags_to_process, KINDLE_HOME_URL)
 
     # Output highlighted books
     if has_output_filepath:
-        write_books_to_file(highlighted_books, options)
+        with open(options[OUTPUT_FILEPATH_VAR], 'w') as fp:
+            fp.write(dump_json(highlighted_books, options))
     else:
         # We don't use the json module's encoding because the ensure_ascii flag is buggy (see documentation for write_books_to_file)
         print dump_json(highlighted_books, options)
